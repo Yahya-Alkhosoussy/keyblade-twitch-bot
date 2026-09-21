@@ -38,6 +38,9 @@ class Bot:
         self.bot_id: str | None = None
 
     async def setup(self):
+        if not Path("tokens").exists():
+            Path("tokens").mkdir()
+
         self.twitch = Twitch(self.app_id, self.app_secret)
         twitch_helper = UserAuthenticationStorageHelper(self.twitch, self.user_scope, Path("tokens/bot.json"))
         await twitch_helper.bind()
@@ -47,10 +50,10 @@ class Bot:
             raise ValueError("Could not find keyblade! check for name change")
         self.keyblade_id = user.id
 
-        bot = await first(self.twitch.get_users(logins=["Bot name"]))
-        if bot is None:
-            raise ValueError("Could not find the bot! Check for name change")
-        self.bot_id = bot.id
+        # bot = await first(self.twitch.get_users(logins=["Bot name"]))
+        # if bot is None:
+        #     raise ValueError("Could not find the bot! Check for name change")
+        # self.bot_id = bot.id
 
         self.eventsub = EventSubWebsocket(self.twitch)
         self.eventsub.start()
@@ -128,7 +131,7 @@ class Bot:
         assert self.eventsub, "Eventsub instance is None"
         assert self.chat, "Chat instance is None"
         assert self.keyblade_id, "Keyblade's ID is None"
-        assert self.bot_id, "Bot ID is None!!"
+        # assert self.bot_id, "Bot ID is None!!"
 
         self.chat.register_event(ChatEvent.READY, self.on_ready)
         self.chat.register_event(ChatEvent.MESSAGE, self.on_message)
