@@ -22,7 +22,7 @@ from twitchAPI.twitch import Twitch
 from twitchAPI.type import AuthScope, ChatEvent
 
 from custom_commands import get_commands
-from utils import TwitchCommand, UserLevel
+from utils import TwitchCommand, TwitchCommandFromWeb, UserLevel
 
 load_dotenv()
 APP_ID = getenv("client_id")
@@ -231,4 +231,34 @@ class Bot:
 
 assert APP_ID and APP_SECRET
 bot = Bot(APP_ID, APP_SECRET, USER_SCOPE, TARGET_CHANNEL)
-asyncio.run(bot.run())
+
+app = FastAPI()
+
+
+@app.post("/api/v1/update_commands")
+async def command_added(command: TwitchCommandFromWeb):
+    print("Adding command")
+    temp_command = TwitchCommand("", "", UserLevel.EVERYONE, False)
+    await bot.update_command_list(temp_command.from_pydantic(command))
+    print("command was added")
+    return {"status": "ok"}, 200
+
+
+@app.post("/api/v1/delete_command")
+async def command_deleted(command: TwitchCommandFromWeb):
+    print("Deleting command")
+    temp_command = TwitchCommand("", "", UserLevel.EVERYONE, False)
+    await bot.delete_command(temp_command.from_pydantic(command))
+    print("Command deleted")
+    return {"status": "ok"}, 200
+
+
+async def main():
+    config = uvicorn.Config(app, host="0.0.0.0", port=7000, log_level="info")
+    server = uvicorn.Server(config)
+
+    asyncio.gather(bot.run(), server.serve(), return_exceptions=True)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
