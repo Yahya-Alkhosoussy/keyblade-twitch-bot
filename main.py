@@ -1,8 +1,11 @@
 import asyncio
 from os import getenv
 from pathlib import Path
+from random import randint
 
+import uvicorn  # noqa
 from dotenv import load_dotenv
+from fastapi import FastAPI  # noqa
 from twitchAPI.chat import Chat, ChatCommand, ChatMessage, EventData
 from twitchAPI.eventsub.websocket import EventSubWebsocket
 from twitchAPI.helper import first
@@ -19,7 +22,7 @@ from twitchAPI.twitch import Twitch
 from twitchAPI.type import AuthScope, ChatEvent
 
 from custom_commands import get_commands
-from utils import TwitchCommand
+from utils import TwitchCommand, UserLevel
 
 load_dotenv()
 APP_ID = getenv("client_id")
@@ -73,8 +76,75 @@ class Bot:
         await ready_event.chat.join_room(self.target_channel)
         print("Bot joined target channels")
 
+    async def update_command_list(self, command: TwitchCommand):
+        self.commands[command.name] = command
+
+    async def delete_command(self, command: TwitchCommand):
+        self.commands.pop(command.name)
+
+    def __is_command_level_met(self, command_level: UserLevel, message: ChatMessage) -> bool:
+        assert message.room
+        match command_level:
+            case UserLevel.EVERYONE:
+                return True
+            case UserLevel.MODS:
+                is_mod = message.user.mod or any(b in message.user.badges for b in ("moderator", "broadcaster"))
+                if is_mod:
+                    return True
+                else:
+                    return False
+            case UserLevel.SUBSCRIBER:
+                is_sub = message.user.subscriber or any(b in message.user.badges for b in ("subscriber", "founder"))
+                is_vip = message.user.vip or "vip" in message.user.badges
+                is_mod = message.user.mod or any(b in message.user.badges for b in ("moderator", "broadcaster"))
+
+                if is_sub or is_vip or is_mod:
+                    return True
+                else:
+                    return False
+            case UserLevel.BROADCASTER:
+                if message.user.name == message.room.name:
+                    return True
+                else:
+                    return False
+            case UserLevel.VIP:
+                is_vip = message.user.vip or "vip" in message.user.badges
+                is_mod = message.user.mod or any(b in message.user.badges for b in ("moderator", "broadcaster"))
+                if is_vip or is_mod:
+                    return True
+                else:
+                    return False
+            case _:
+                raise ValueError("Invalid Command Level")
+
+    async def __deal_with_variables(self, message: str, msg: ChatMessage) -> str:
+        assert msg.room and self.twitch
+        if r"${user}" in message:
+            message = message.replace(r"${user}", msg.user.display_name)
+        if r"${game}" in message:
+            stream = await first(self.twitch.get_streams(user_id=[msg.room.room_id]))
+
+            if stream:
+                game = stream.game_name
+            else:
+                channel_info = await self.twitch.get_channel_information(broadcaster_id=msg.room.room_id)
+                game = channel_info[0].game_name
+
+            message = message.replace(r"${game}", game)
+        if r"${random}" in message:
+            number = randint(0, 300)
+            message = message.replace(r"${random}", str(number))
+        return message
+
     async def on_message(self, msg: ChatMessage):
-        pass  # just in case I want to use it in the future
+        if msg.text.split()[0] in self.commands:  # check the first word only
+            command = self.commands[msg.text.split()[0]]
+            if not command.active:
+                return
+            level_met = self.__is_command_level_met(command.user_level, msg)
+            if level_met:
+                command_reply = await self.__deal_with_variables(command.reply, msg)
+                await msg.reply(command_reply)
 
     async def on_raid(self, _event: ChannelRaidEvent):
         assert self.twitch and self.chat
