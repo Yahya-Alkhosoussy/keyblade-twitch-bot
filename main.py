@@ -7,19 +7,21 @@ from twitchAPI.chat import Chat, ChatCommand, ChatMessage, EventData
 from twitchAPI.eventsub.websocket import EventSubWebsocket
 from twitchAPI.helper import first
 from twitchAPI.oauth import UserAuthenticationStorageHelper
-from twitchAPI.object.eventsub import ChannelRaidEvent
+from twitchAPI.object.eventsub import (  # noqa
+    ChannelAdBreakBeginEvent,
+    ChannelBitsUseEvent,
+    ChannelRaidEvent,
+    ChannelSubscribeEvent,
+    ChannelSubscriptionGiftEvent,
+    ChannelSubscriptionMessageEvent,
+)
 from twitchAPI.twitch import Twitch
 from twitchAPI.type import AuthScope, ChatEvent
 
 load_dotenv()
 APP_ID = getenv("client_id")
 APP_SECRET = getenv("client_secret")
-USER_SCOPE = [
-    AuthScope.CHAT_READ,
-    AuthScope.CHAT_EDIT,
-    AuthScope.USER_WRITE_CHAT,
-    AuthScope.CLIPS_EDIT,
-]
+USER_SCOPE = [AuthScope.CHAT_READ, AuthScope.CHAT_EDIT, AuthScope.USER_WRITE_CHAT, AuthScope.CLIPS_EDIT, AuthScope.BITS_READ]
 
 TARGET_CHANNEL = ["emberedkeyblade"]
 
@@ -86,7 +88,7 @@ class Bot:
 
         await self.chat.send_message(
             room=channel_raided,
-            text=f"{raider} is raiding the channel with {viewer_count} viewers! They were playing {game}"
+            text=f"{raider} is raiding the channel with {viewer_count} viewers! They were playing {game} "
             f"Check them out on https://twitch.tv/{raider}",
         )
 
@@ -116,6 +118,8 @@ class Bot:
         await self.chat.send_message(room=cmd.room.name, text=clip.url)
 
     async def lurk_command(self, cmd: ChatCommand):
+        assert cmd.room
+        await asyncio.sleep(0.5)
         await cmd.reply(f"Thank you for lurking {cmd.user.display_name}! Hope you enjoy the stream and sit back and relax")
 
     async def close_bot(self):
@@ -134,7 +138,7 @@ class Bot:
         # assert self.bot_id, "Bot ID is None!!"
 
         self.chat.register_event(ChatEvent.READY, self.on_ready)
-        self.chat.register_event(ChatEvent.MESSAGE, self.on_message)
+        # self.chat.register_event(ChatEvent.MESSAGE, self.on_message)
 
         self.chat.register_command("lurk", self.lurk_command)
         self.chat.register_command("clip", self.clip_command)
