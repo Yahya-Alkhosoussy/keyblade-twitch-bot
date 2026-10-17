@@ -18,6 +18,9 @@ from twitchAPI.object.eventsub import (  # noqa
 from twitchAPI.twitch import Twitch
 from twitchAPI.type import AuthScope, ChatEvent
 
+from custom_commands import get_commands
+from utils import TwitchCommand
+
 load_dotenv()
 APP_ID = getenv("client_id")
 APP_SECRET = getenv("client_secret")
@@ -38,6 +41,7 @@ class Bot:
         self.chat: Chat | None = None
         self.keyblade_id: str | None = None
         self.bot_id: str | None = None
+        self.commands: dict[str, TwitchCommand] = {}
 
     async def setup(self):
         if not Path("tokens").exists():
@@ -61,6 +65,8 @@ class Bot:
         self.eventsub.start()
 
         self.chat = await Chat(self.twitch)
+        for command in await get_commands():
+            self.commands[command.name] = command
 
     async def on_ready(self, ready_event: EventData):
         print("Bot is ready!")
