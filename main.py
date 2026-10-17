@@ -27,7 +27,7 @@ from utils import TwitchCommand, TwitchCommandFromWeb, UserLevel
 load_dotenv()
 APP_ID = getenv("client_id")
 APP_SECRET = getenv("client_secret")
-USER_SCOPE = [AuthScope.CHAT_READ, AuthScope.CHAT_EDIT, AuthScope.USER_WRITE_CHAT, AuthScope.CLIPS_EDIT, AuthScope.BITS_READ]
+USER_SCOPE = [AuthScope.CHAT_READ, AuthScope.CHAT_EDIT, AuthScope.USER_WRITE_CHAT, AuthScope.CLIPS_EDIT]
 
 TARGET_CHANNEL = ["emberedkeyblade"]
 
@@ -48,9 +48,11 @@ class Bot:
 
     async def setup(self):
         if not Path("tokens").exists():
+            print("tokens folder not found. Making")
             Path("tokens").mkdir()
 
         self.twitch = Twitch(self.app_id, self.app_secret)
+        print(f"Checking for bot token... {Path('tokens/bot.json').exists()}")
         twitch_helper = UserAuthenticationStorageHelper(self.twitch, self.user_scope, Path("tokens/bot.json"))
         await twitch_helper.bind()
 
@@ -206,25 +208,27 @@ class Bot:
         await self.twitch.close()
 
     async def run(self):
-        await self.setup()
-        assert self.twitch, "Twitch instance is None"
-        assert self.eventsub, "Eventsub instance is None"
-        assert self.chat, "Chat instance is None"
-        assert self.keyblade_id, "Keyblade's ID is None"
-        # assert self.bot_id, "Bot ID is None!!"
-
-        self.chat.register_event(ChatEvent.READY, self.on_ready)
-        # self.chat.register_event(ChatEvent.MESSAGE, self.on_message)
-
-        self.chat.register_command("lurk", self.lurk_command)
-        self.chat.register_command("clip", self.clip_command)
-
-        await self.eventsub.listen_channel_raid(self.on_raid, to_broadcaster_user_id=self.keyblade_id)
-
-        self.chat.start()
-
         try:
-            input("press ENTER to stop \n")
+            await self.setup()
+            assert self.twitch, "Twitch instance is None"
+            assert self.eventsub, "Eventsub instance is None"
+            assert self.chat, "Chat instance is None"
+            assert self.keyblade_id, "Keyblade's ID is None"
+            # assert self.bot_id, "Bot ID is None!!"
+
+            self.chat.register_event(ChatEvent.READY, self.on_ready)
+            self.chat.register_event(ChatEvent.MESSAGE, self.on_message)
+
+            self.chat.register_command("lurk", self.lurk_command)
+            self.chat.register_command("clip", self.clip_command)
+
+            await self.eventsub.listen_channel_raid(self.on_raid, to_broadcaster_user_id=self.keyblade_id)
+
+            self.chat.start()
+
+            await asyncio.Event().wait()
+        except Exception as e:
+            print(f"Error: {e}")
         finally:
             await self.close_bot()
 
@@ -241,7 +245,7 @@ async def command_added(command: TwitchCommandFromWeb):
     temp_command = TwitchCommand("", "", UserLevel.EVERYONE, False)
     await bot.update_command_list(temp_command.from_pydantic(command))
     print("command was added")
-    return {"status": "ok"}, 200
+    return {"status": "ok"}
 
 
 @app.post("/api/v1/delete_command")
@@ -250,14 +254,14 @@ async def command_deleted(command: TwitchCommandFromWeb):
     temp_command = TwitchCommand("", "", UserLevel.EVERYONE, False)
     await bot.delete_command(temp_command.from_pydantic(command))
     print("Command deleted")
-    return {"status": "ok"}, 200
+    return {"status": "ok"}
 
 
 async def main():
     config = uvicorn.Config(app, host="0.0.0.0", port=7000, log_level="info")
     server = uvicorn.Server(config)
 
-    asyncio.gather(bot.run(), server.serve(), return_exceptions=True)
+    await asyncio.gather(bot.run(), server.serve(), return_exceptions=True)
 
 
 if __name__ == "__main__":
