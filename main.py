@@ -312,32 +312,10 @@ class Bot:
     async def on_hype_train(self, _event: HypeTrainEvent):
         assert self.twitch and self.keyblade_id and self.bot_id
         event = _event.event
-        last_contribution = event.last_contribution
-        tier_sub = ""
-        if last_contribution.type == "subscription":
-            match last_contribution.total:
-                case 500:
-                    tier_sub = "tier 1"
-                case 1000:
-                    tier_sub = "tier 2"
-                case 2500:
-                    tier_sub = "tier 3"
-
-        if tier_sub:
-            await self.twitch.send_chat_announcement(
-                self.keyblade_id,
-                self.bot_id,
-                f"HYPE TRAIN!!! Thank you guys for starting a hype train! We need {event.goal} points to reach the next"
-                f" level!! Thank you {event.last_contribution.user_login} for starting this hype train using"
-                f" a {tier_sub} subscription!",
-            )
-            return
         await self.twitch.send_chat_announcement(
             self.keyblade_id,
             self.bot_id,
-            f"HYPE TRAIN!!! Thank you guys for starting a hype train! We need {event.goal} points to reach the next"
-            f" level!! Thank you {event.last_contribution.user_login} for starting this hype train using"
-            f" {last_contribution.total} bits!",
+            f"HYPE TRAIN!!! Thank you guys for starting a hype train! We need {event.goal} points to reach the next level!!",
         )
 
     async def on_hype_train_end(self, _event: HypeTrainEndEvent):
