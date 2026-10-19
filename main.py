@@ -10,13 +10,16 @@ from twitchAPI.chat import Chat, ChatCommand, ChatMessage, EventData
 from twitchAPI.eventsub.websocket import EventSubWebsocket
 from twitchAPI.helper import first
 from twitchAPI.oauth import UserAuthenticationStorageHelper
-from twitchAPI.object.eventsub import (  # noqa
+from twitchAPI.object.eventsub import (
     ChannelAdBreakBeginEvent,
     ChannelBitsUseEvent,
+    ChannelCheerEvent,
+    ChannelFollowEvent,
     ChannelRaidEvent,
-    ChannelSubscribeEvent,
     ChannelSubscriptionGiftEvent,
-    ChannelSubscriptionMessageEvent,
+    GoalEvent,
+    HypeTrainEndEvent,
+    HypeTrainEvent,
 )
 from twitchAPI.twitch import Twitch
 from twitchAPI.type import AuthScope, ChatEvent
@@ -27,20 +30,42 @@ from utils import TwitchCommand, TwitchCommandFromWeb, UserLevel
 load_dotenv()
 APP_ID = getenv("client_id")
 APP_SECRET = getenv("client_secret")
-USER_SCOPE = [AuthScope.CHAT_READ, AuthScope.CHAT_EDIT, AuthScope.USER_WRITE_CHAT, AuthScope.CLIPS_EDIT]
+USER_SCOPE = [
+    AuthScope.CHAT_READ,
+    AuthScope.CHAT_EDIT,
+    AuthScope.USER_WRITE_CHAT,
+    AuthScope.CLIPS_EDIT,
+    AuthScope.MODERATOR_MANAGE_ANNOUNCEMENTS,
+]
+
+MOD_SCOPE = [
+    AuthScope.MODERATOR_READ_FOLLOWERS,
+    AuthScope.CHANNEL_READ_ADS,
+    AuthScope.CHANNEL_READ_SUBSCRIPTIONS,
+    AuthScope.BITS_READ,
+    AuthScope.CHANNEL_MODERATE,
+    AuthScope.CHANNEL_READ_GOALS,
+    AuthScope.CHANNEL_READ_HYPE_TRAIN,
+    AuthScope.CHANNEL_READ_REDEMPTIONS,
+]
 
 TARGET_CHANNEL = ["emberedkeyblade"]
 
 
 class Bot:
-    def __init__(self, app_id: str, app_secret: str, user_scope: list[AuthScope], target_channel: list[str]):
+    def __init__(
+        self, app_id: str, app_secret: str, user_scope: list[AuthScope], mod_scope: list[AuthScope], target_channel: list[str]
+    ):
         self.app_id = app_id
         self.app_secret = app_secret
         self.user_scope = user_scope
+        self.mod_scope = mod_scope
         self.target_channel = target_channel
 
         self.eventsub: EventSubWebsocket | None = None
+        self.mod_eventsub: EventSubWebsocket | None = None
         self.twitch: Twitch | None = None
+        self.mod_twitch: Twitch | None = None
         self.chat: Chat | None = None
         self.keyblade_id: str | None = None
         self.bot_id: str | None = None
@@ -52,22 +77,28 @@ class Bot:
             Path("tokens").mkdir()
 
         self.twitch = Twitch(self.app_id, self.app_secret)
-        print(f"Checking for bot token... {Path('tokens/bot.json').exists()}")
         twitch_helper = UserAuthenticationStorageHelper(self.twitch, self.user_scope, Path("tokens/bot.json"))
         await twitch_helper.bind()
 
-        user = await first(self.twitch.get_users(logins=["emberedkeyblade"]))
+        self.mod_twitch = Twitch(self.app_id, self.app_secret)
+        twitch_helper = UserAuthenticationStorageHelper(self.mod_twitch, self.mod_scope, Path("tokens/keyblade.json"))
+        await twitch_helper.bind()
+
+        user = await first(self.mod_twitch.get_users())
         if user is None:
             raise ValueError("Could not find keyblade! check for name change")
         self.keyblade_id = user.id
 
-        # bot = await first(self.twitch.get_users(logins=["Bot name"]))
-        # if bot is None:
-        #     raise ValueError("Could not find the bot! Check for name change")
-        # self.bot_id = bot.id
+        bot = await first(self.twitch.get_users())
+        if bot is None:
+            raise ValueError("Could not find the bot! Check for name change")
+        self.bot_id = bot.id
 
         self.eventsub = EventSubWebsocket(self.twitch)
         self.eventsub.start()
+
+        self.mod_eventsub = EventSubWebsocket(self.mod_twitch)
+        self.mod_eventsub.start()
 
         self.chat = await Chat(self.twitch)
         for command in await get_commands():
@@ -195,17 +226,146 @@ class Bot:
             return
         await self.chat.send_message(room=cmd.room.name, text=clip.url)
 
-    async def lurk_command(self, cmd: ChatCommand):
-        assert cmd.room
-        await asyncio.sleep(0.5)
-        await cmd.reply(f"Thank you for lurking {cmd.user.display_name}! Hope you enjoy the stream and sit back and relax")
-
     async def close_bot(self):
         assert self.eventsub and self.chat
         assert self.twitch
         await self.eventsub.stop()
         self.chat.stop()
         await self.twitch.close()
+
+    async def on_follow(self, event: ChannelFollowEvent):
+        assert self.chat
+        await self.chat.send_message(event.event.broadcaster_user_login, f"Thank you for following {event.event.user_name}!")
+
+    async def on_ad_break(self, _event: ChannelAdBreakBeginEvent):
+        assert self.chat and self.keyblade_id and self.bot_id
+        assert self.twitch
+        await self.twitch.send_chat_announcement(
+            self.keyblade_id,
+            self.bot_id,
+            f"Incoming ad break! Ads will be playing for {_event.event.duration_seconds}",
+            color="purple",
+        )
+
+    async def on_channel_sub_gift(self, _event: ChannelSubscriptionGiftEvent):
+        assert self.chat
+        event = _event.event
+        gifter = event.user_login if not event.is_anonymous else "anonymous"
+        total_gifted = event.cumulative_total
+        tier_of_sub = event.tier
+        tier = 0
+        match tier_of_sub:
+            case "1000":
+                tier = 1
+            case "2000":
+                tier = 2
+            case "3000":
+                tier = 3
+
+        if total_gifted and tier != 0:
+            await self.chat.send_message(
+                event.broadcaster_user_login,
+                f"Thank you {gifter} for gifting {total_gifted} tier {tier} sub{'s' if total_gifted > 1 else ''}!",
+            )
+        elif total_gifted:
+            await self.chat.send_message(event.broadcaster_user_login, f"Thank you {gifter} for gifting {total_gifted} subs!")
+        else:
+            await self.chat.send_message(event.broadcaster_user_login, f"Thank you {gifter} for gifting subs!!")
+
+    async def on_channel_cheer(self, _event: ChannelCheerEvent):
+        assert self.chat
+        cheerer = _event.event.user_name if not _event.event.is_anonymous else "anonymous"
+        await self.chat.send_message(
+            _event.event.broadcaster_user_name,
+            f"Thank you {cheerer} for cheering with {_event.event.bits}!",
+        )
+
+    async def on_channel_goal_end(self, _event: GoalEvent):
+        assert self.chat
+        if not _event.event.is_achieved:
+            return
+
+        type = _event.event.type
+
+        goal_type = ""
+
+        match type:
+            case "follow":
+                goal_type = "followers"
+            case "subscription":
+                goal_type = "subscribers"
+            case "subscription_count":
+                goal_type = "subscribers"
+            case "new_subscription":
+                goal_type = "new subscribers"
+            case "new_subscription_count":
+                goal_type = "new subscribers"
+
+        if goal_type == "":
+            return
+
+        await self.chat.send_message(
+            _event.event.broadcaster_user_login,
+            f"Thank you everyone! We have successfully achieved the goal of {_event.event.current_amount} {goal_type}!!",
+        )
+
+    async def on_hype_train(self, _event: HypeTrainEvent):
+        assert self.twitch and self.keyblade_id and self.bot_id
+        event = _event.event
+        last_contribution = event.last_contribution
+        tier_sub = ""
+        if last_contribution.type == "subscription":
+            match last_contribution.total:
+                case 500:
+                    tier_sub = "tier 1"
+                case 1000:
+                    tier_sub = "tier 2"
+                case 2500:
+                    tier_sub = "tier 3"
+
+        if tier_sub:
+            await self.twitch.send_chat_announcement(
+                self.keyblade_id,
+                self.bot_id,
+                f"HYPE TRAIN!!! Thank you guys for starting a hype train! We need {event.goal} points to reach the next"
+                f" level!! Thank you {event.last_contribution.user_login} for starting this hype train using"
+                f" a {tier_sub} subscription!",
+            )
+            return
+        await self.twitch.send_chat_announcement(
+            self.keyblade_id,
+            self.bot_id,
+            f"HYPE TRAIN!!! Thank you guys for starting a hype train! We need {event.goal} points to reach the next"
+            f" level!! Thank you {event.last_contribution.user_login} for starting this hype train using"
+            f" {last_contribution.total} bits!",
+        )
+
+    async def on_hype_train_end(self, _event: HypeTrainEndEvent):
+        assert self.twitch and self.keyblade_id and self.bot_id
+        event = _event.event
+
+        await self.twitch.send_chat_announcement(
+            self.keyblade_id,
+            self.bot_id,
+            f"HYPE TRAIN ENDED!! Thank you all for this hype train! We ended at level {event.level} of the hype train."
+            f" The total contributions to this hype train was {event.total} points!",
+        )
+
+    async def on_channel_bits_use(self, _event: ChannelBitsUseEvent):
+        assert self.chat
+        event = _event.event
+        match event.type:
+            case "cheer":
+                return
+            case "power_up":
+                await self.chat.send_message(
+                    event.broadcaster_user_login,
+                    f"Thank you {event.user_name} for redeeming a power up for {event.bits}!!",
+                )
+            case "combo":
+                await self.chat.send_message(
+                    event.broadcaster_user_login, f"Thank you {event.user_name} for redeeming a combo for {event.bits}!!"
+                )
 
     async def run(self):
         try:
@@ -214,15 +374,26 @@ class Bot:
             assert self.eventsub, "Eventsub instance is None"
             assert self.chat, "Chat instance is None"
             assert self.keyblade_id, "Keyblade's ID is None"
-            # assert self.bot_id, "Bot ID is None!!"
+            assert self.bot_id, "Bot ID is None!!"
+            assert self.mod_eventsub, "Mod eventsub is None!!"
 
             self.chat.register_event(ChatEvent.READY, self.on_ready)
             self.chat.register_event(ChatEvent.MESSAGE, self.on_message)
 
-            self.chat.register_command("lurk", self.lurk_command)
             self.chat.register_command("clip", self.clip_command)
 
-            await self.eventsub.listen_channel_raid(self.on_raid, to_broadcaster_user_id=self.keyblade_id)
+            await self.mod_eventsub.listen_channel_raid(self.on_raid, to_broadcaster_user_id=self.keyblade_id)
+            await self.mod_eventsub.listen_channel_follow_v2(self.keyblade_id, self.bot_id, self.on_follow)
+            await self.mod_eventsub.listen_channel_ad_break_begin(self.keyblade_id, self.on_ad_break)
+            await self.mod_eventsub.listen_channel_subscription_gift(self.keyblade_id, self.on_channel_sub_gift)
+            await self.mod_eventsub.listen_channel_cheer(self.keyblade_id, self.on_channel_cheer)
+            await self.mod_eventsub.listen_goal_end(self.keyblade_id, self.on_channel_goal_end)
+            await self.mod_eventsub.listen_hype_train_begin(self.keyblade_id, self.on_hype_train)
+            await self.mod_eventsub.listen_hype_train_end(self.keyblade_id, self.on_hype_train_end)
+            await self.mod_eventsub.listen_channel_bits_use(self.keyblade_id, self.on_channel_bits_use)
+            # await self.mod_eventsub.listen_channel_points_custom_reward_redemption_add()
+            # await self.mod_eventsub.listen_channel_ban()
+            # await self.mod_eventsub.listen_channel_unban()
 
             self.chat.start()
 
@@ -234,7 +405,7 @@ class Bot:
 
 
 assert APP_ID and APP_SECRET
-bot = Bot(APP_ID, APP_SECRET, USER_SCOPE, TARGET_CHANNEL)
+bot = Bot(APP_ID, APP_SECRET, USER_SCOPE, MOD_SCOPE, TARGET_CHANNEL)
 
 app = FastAPI()
 
