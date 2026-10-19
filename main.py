@@ -3,9 +3,9 @@ from os import getenv
 from pathlib import Path
 from random import randint
 
-import uvicorn  # noqa
+import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI  # noqa
+from fastapi import FastAPI
 from twitchAPI.chat import Chat, ChatCommand, ChatMessage, EventData
 from twitchAPI.eventsub.websocket import EventSubWebsocket
 from twitchAPI.helper import first
@@ -243,7 +243,7 @@ class Bot:
         await self.twitch.send_chat_announcement(
             self.keyblade_id,
             self.bot_id,
-            f"Incoming ad break! Ads will be playing for {_event.event.duration_seconds}",
+            f"Incoming ad break! Ads will be playing for {_event.event.duration_seconds // 60} minutes",
             color="purple",
         )
 
