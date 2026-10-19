@@ -383,7 +383,7 @@ class Bot:
             self.chat.register_command("clip", self.clip_command)
 
             await self.mod_eventsub.listen_channel_raid(self.on_raid, to_broadcaster_user_id=self.keyblade_id)
-            await self.mod_eventsub.listen_channel_follow_v2(self.keyblade_id, self.bot_id, self.on_follow)
+            await self.mod_eventsub.listen_channel_follow_v2(self.keyblade_id, self.keyblade_id, self.on_follow)
             await self.mod_eventsub.listen_channel_ad_break_begin(self.keyblade_id, self.on_ad_break)
             await self.mod_eventsub.listen_channel_subscription_gift(self.keyblade_id, self.on_channel_sub_gift)
             await self.mod_eventsub.listen_channel_cheer(self.keyblade_id, self.on_channel_cheer)
