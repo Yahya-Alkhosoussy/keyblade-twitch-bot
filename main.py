@@ -25,7 +25,7 @@ from twitchAPI.twitch import Twitch
 from twitchAPI.type import AuthScope, ChatEvent
 
 from custom_commands import get_commands
-from utils import TwitchCommand, TwitchCommandFromWeb, UserLevel
+from utils import CommandLevels, TwitchCommand, TwitchCommandFromWeb
 
 load_dotenv()
 APP_ID = getenv("client_id")
@@ -115,40 +115,22 @@ class Bot:
     async def delete_command(self, command: TwitchCommand):
         self.commands.pop(command.name)
 
-    def __is_command_level_met(self, command_level: UserLevel, message: ChatMessage) -> bool:
+    def __get_user_roles(self, message: ChatMessage) -> CommandLevels:
         assert message.room
-        match command_level:
-            case UserLevel.EVERYONE:
-                return True
-            case UserLevel.MODS:
-                is_mod = message.user.mod or any(b in message.user.badges for b in ("moderator", "broadcaster"))
-                if is_mod:
-                    return True
-                else:
-                    return False
-            case UserLevel.SUBSCRIBER:
-                is_sub = message.user.subscriber or any(b in message.user.badges for b in ("subscriber", "founder"))
-                is_vip = message.user.vip or "vip" in message.user.badges
-                is_mod = message.user.mod or any(b in message.user.badges for b in ("moderator", "broadcaster"))
+        user = message.user
+        badge = user.badges
 
-                if is_sub or is_vip or is_mod:
-                    return True
-                else:
-                    return False
-            case UserLevel.BROADCASTER:
-                if message.user.name == message.room.name:
-                    return True
-                else:
-                    return False
-            case UserLevel.VIP:
-                is_vip = message.user.vip or "vip" in message.user.badges
-                is_mod = message.user.mod or any(b in message.user.badges for b in ("moderator", "broadcaster"))
-                if is_vip or is_mod:
-                    return True
-                else:
-                    return False
-            case _:
-                raise ValueError("Invalid Command Level")
+        roles = CommandLevels.EVERYONE
+        if user.subscriber or any(b in badge for b in ("subscriber", "founder")):
+            roles |= CommandLevels.SUBSCRIBER
+        if user.vip or "vip" in badge:
+            roles |= CommandLevels.VIP
+        if user.mod or any(b in badge for b in ("moderator", "broadcaster")):
+            roles |= CommandLevels.MOD
+        if "broadcaster" in badge:
+            roles |= CommandLevels.STREAMER
+
+        return roles
 
     async def __deal_with_variables(self, message: str, msg: ChatMessage) -> str:
         assert msg.room and self.twitch
@@ -174,7 +156,8 @@ class Bot:
             command = self.commands[msg.text.split()[0]]
             if not command.active:
                 return
-            level_met = self.__is_command_level_met(command.user_level, msg)
+            user_level = self.__get_user_roles(msg)
+            level_met = command.user_level.allows(user_level)
             if level_met:
                 command_reply = await self.__deal_with_variables(command.reply, msg)
                 await msg.reply(command_reply)
@@ -391,7 +374,7 @@ app = FastAPI()
 @app.post("/api/v1/update_commands")
 async def command_added(command: TwitchCommandFromWeb):
     print("Adding command")
-    temp_command = TwitchCommand("", "", UserLevel.EVERYONE, False)
+    temp_command = TwitchCommand("", "", CommandLevels.EVERYONE, False)
     await bot.update_command_list(temp_command.from_pydantic(command))
     print("command was added")
     return {"status": "ok"}
@@ -400,7 +383,7 @@ async def command_added(command: TwitchCommandFromWeb):
 @app.post("/api/v1/delete_command")
 async def command_deleted(command: TwitchCommandFromWeb):
     print("Deleting command")
-    temp_command = TwitchCommand("", "", UserLevel.EVERYONE, False)
+    temp_command = TwitchCommand("", "", CommandLevels.EVERYONE, False)
     await bot.delete_command(temp_command.from_pydantic(command))
     print("Command deleted")
     return {"status": "ok"}

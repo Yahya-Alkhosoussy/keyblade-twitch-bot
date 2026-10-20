@@ -2,7 +2,7 @@ from pathlib import Path
 
 from aiosqlite import connect
 
-from utils import TwitchCommand, UserLevel
+from utils import CommandLevels, TwitchCommand
 
 db_dir = Path("database")
 db_path = db_dir / "chat_commands.db"
@@ -48,7 +48,7 @@ async def get_commands():
                     TwitchCommand(
                         name=result[0],
                         reply=result[1],
-                        user_level=UserLevel(result[2].lower()),
+                        user_level=CommandLevels.parse(result[2].lower()),
                         active=bool(result[3]),
                     )
                 )
